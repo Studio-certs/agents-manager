@@ -115,5 +115,3 @@ export async function isAdmin() {
   const role = await getUserRole();
   return role === 'admin';
 }
-
-export { supabase }
