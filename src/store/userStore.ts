@@ -68,15 +68,39 @@ export const useUserStore = create<UserState>()(
           const { user } = useAuthStore.getState();
           if (!user) throw new Error('No authenticated user');
 
-          const { data, error } = await supabase
+          // First try to fetch the existing profile
+          const { data: existingProfile, error: fetchError } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', user.id)
-            .single();
+            .maybeSingle(); // Use maybeSingle instead of single to handle no results
 
-          if (error) throw error;
+          if (fetchError) throw fetchError;
+
+          // If no profile exists, create one
+          if (!existingProfile) {
+            const { data: newProfile, error: insertError } = await supabase
+              .from('profiles')
+              .insert({
+                id: user.id,
+                email: user.email || '',
+                role: 'user'
+              })
+              .select()
+              .single();
+
+            if (insertError) throw insertError;
+            
+            set({ 
+              currentUser: newProfile, 
+              loading: false,
+              lastFetched: Date.now()
+            });
+            return;
+          }
+
           set({ 
-            currentUser: data, 
+            currentUser: existingProfile, 
             loading: false,
             lastFetched: Date.now()
           });
@@ -138,7 +162,7 @@ export const useUserStore = create<UserState>()(
           // Force refetch of all data
           state.fetchUsers();
           state.fetchCurrentUser();
-          state.isAdmin()
+          state.isAdmin();
         }
       }
     }
