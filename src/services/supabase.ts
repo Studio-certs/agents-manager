@@ -20,6 +20,38 @@ try {
   throw new Error('Invalid VITE_SUPABASE_URL format. Please reconnect to Supabase using the "Connect to Supabase" button.');
 }
 
+// Retry mechanism with exponential backoff
+async function retryWithBackoff<T>(
+  operation: () => Promise<T>,
+  maxRetries = 3,
+  baseDelay = 1000
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+      
+      // If this is not a connection error, don't retry
+      if (!(error instanceof Error) || 
+          !error.message.includes('connect error') &&
+          !error.message.includes('503')) {
+        throw error;
+      }
+      
+      // Calculate delay with exponential backoff
+      const delay = baseDelay * Math.pow(2, attempt);
+      
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError || new Error('Operation failed after maximum retries');
+}
+
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
@@ -28,9 +60,12 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   }
 });
 
+// Wrap auth operations with retry mechanism
 export async function getCurrentUser() {
   try {
-    const { data: { session }, error } = await supabase.auth.getSession();
+    const { data: { session }, error } = await retryWithBackoff(() => 
+      supabase.auth.getSession()
+    );
     if (error) throw error;
     return session?.user;
   } catch (error) {
@@ -44,11 +79,13 @@ export async function getUserRole() {
     const user = await getCurrentUser();
     if (!user) return null;
     
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle();
+    const { data, error } = await retryWithBackoff(() =>
+      supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle()
+    );
     
     if (error) throw error;
     return data?.role;
