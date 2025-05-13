@@ -2,83 +2,70 @@ import React, { useState } from 'react';
 import {
   Modal,
   TextArea,
-  FileUploader,
-  Button,
   Stack,
   InlineNotification,
   ProgressBar,
+  Tabs,
+  Tab,
+  Button,
+  TabList,
+  TabPanel,
+  TabPanels
 } from '@carbon/react';
-import { useServiceUsageStore } from '../../store/serviceUsageStore';
-import { usePersonalDocumentStore } from '../../store/personalDocumentStore';
-import { supabase } from '../../services/supabase';
+
+import DocumentUploadModal from '../documents/DocumentUploadModal';
+import DocumentSelector from '../documents/DocumentSelector';
+import { useServiceRun } from '../../hooks/useServiceRun';
+import type { Database } from '../../types/database.types';
+import { useUserStore } from '../../store/userStore';
+import DocumentList from '../documents/DocumentList';
+
+type Service = Database['public']['Tables']['services']['Row'];
 
 interface ServiceUsageFormProps {
   isOpen: boolean;
   onClose: () => void;
-  service: {
-    id: string;
-    name: string;
-    instructions: string | null;
-  };
+  service: Service;
+  projectId: string;
 }
 
-const ServiceUsageForm: React.FC<ServiceUsageFormProps> = ({ isOpen, onClose, service }) => {
+const ServiceUsageForm: React.FC<ServiceUsageFormProps> = ({ isOpen, onClose, service, projectId }) => {
   const [customInput, setCustomInput] = useState('');
-  const [file, setFile] = useState<File | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const { createUsageRecord } = useServiceUsageStore();
-  const { uploadDocument } = usePersonalDocumentStore();
+  const [inputError, setInputError] = useState<string | null>(null);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
+  const { isRunning, error, runService, reset } = useServiceRun(service.id, projectId);
 
-  const handleSubmit = async () => {
-    try {
-      setError(null);
-      setUploading(true);
-
-      let documentId = null;
-
-      // Upload document if provided
-      let uploadedDoc = null;
-      if (file) {
-        uploadedDoc = await uploadDocument(file);
-        if (!uploadedDoc) throw new Error('Failed to upload document');
-        documentId = uploadedDoc.id;
-      }
-
-      // Make request to service
-      const response = await fetch(service.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          topic: customInput,
-          documentUrl: uploadedDoc ? await getDocumentUrl(uploadedDoc.path) : null,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Service request failed');
-      }
-
-      const result = await response.json();
-
-      // Create usage record
-      const usageRecord = await createUsageRecord(
-        service.id,
-        documentId,
-        customInput || null,
-        result
-      );
-
-      if (!usageRecord) throw new Error('Failed to create usage record');
-
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setUploading(false);
+  const validateForm = () => {
+    setInputError(null);
+    if (!customInput.trim() && selectedDocumentIds.length === 0) {
+      setInputError("Please provide either text input or select an existing document");
+      return false;
     }
+    return true;
+  };
+  
+  const handleSubmit = async () => {
+    if (!validateForm()) return;
+    
+    try {
+      await runService(selectedDocumentIds, customInput);
+      onClose();
+      setCustomInput('');
+      setSelectedDocumentIds([]);
+      setInputError(null);
+    } catch (err) {
+      // Error is handled by the hook
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setCustomInput(e.target.value);
+    if (inputError) setInputError(null);
+  };
+
+  const handleDocumentSelection = (selectedIds: string[]) => {
+    setSelectedDocumentIds(selectedIds);
+    if (inputError && selectedIds.length > 0) setInputError(null);
   };
 
   return (
@@ -89,6 +76,8 @@ const ServiceUsageForm: React.FC<ServiceUsageFormProps> = ({ isOpen, onClose, se
       primaryButtonText="Submit"
       secondaryButtonText="Cancel"
       onRequestSubmit={handleSubmit}
+      size="lg"
+      primaryButtonDisabled={isRunning}
     >
       <Stack gap={7}>
         {error && (
@@ -96,6 +85,15 @@ const ServiceUsageForm: React.FC<ServiceUsageFormProps> = ({ isOpen, onClose, se
             kind="error"
             title="Error"
             subtitle={error}
+            hideCloseButton
+          />
+        )}
+        
+        {inputError && (
+          <InlineNotification
+            kind="error"
+            title="Validation Error"
+            subtitle={inputError}
             hideCloseButton
           />
         )}
@@ -112,27 +110,25 @@ const ServiceUsageForm: React.FC<ServiceUsageFormProps> = ({ isOpen, onClose, se
           labelText="Additional Information"
           placeholder="Enter any additional information needed for the service..."
           value={customInput}
-          onChange={(e) => setCustomInput(e.target.value)}
+          onChange={handleInputChange}
           rows={4}
+          invalid={!!inputError && !customInput.trim() && selectedDocumentIds.length === 0}
+          invalidText="Input is required if no files are selected"
         />
 
-        <FileUploader
-          labelTitle="Upload Document"
-          labelDescription="Max file size: 10MB. Supported file types: PDF, DOC, DOCX, XLS, XLSX, JPG, PNG"
-          buttonLabel="Add file"
-          accept={['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.jpg', '.png']}
-          multiple={false}
-          onChange={(e: Event) => {
-            const target = e.target as HTMLInputElement;
-            if (target.files) {
-              setFile(target.files[0]);
-            }
-          }}
-        />
-
-        {uploading && (
+        <div className="document-section">
+          <DocumentList 
+            projectId={projectId}
+            mode="select"
+            selectedIds={selectedDocumentIds}
+            onSelectionChange={handleDocumentSelection}
+            showUploadButton={true}
+          />
+        </div>
+        {isRunning && (
           <ProgressBar
-            helperText="Processing..."
+            label="Processing"
+            helperText="Running service..."
             value={50}
             max={100}
           />
@@ -140,20 +136,6 @@ const ServiceUsageForm: React.FC<ServiceUsageFormProps> = ({ isOpen, onClose, se
       </Stack>
     </Modal>
   );
-}
-
-async function getDocumentUrl(path: string): Promise<string | null> {
-  try {
-    const { data, error } = await supabase.storage
-      .from('documents')
-      .createSignedUrl(path, 3600); // 1 hour expiry
-
-    if (error) throw error;
-    return data.signedUrl;
-  } catch (error) {
-    console.error('Error getting signed URL:', error);
-    return null;
-  }
-}
+};
 
 export default ServiceUsageForm;

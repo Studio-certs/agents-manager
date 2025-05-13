@@ -10,65 +10,113 @@ import {
   Loading,
   Tag,
   Button,
+  Accordion,
+  AccordionItem,
 } from '@carbon/react';
-import { Download, Search } from '@carbon/icons-react';
-import { useServiceUsageStore } from '../../store/serviceUsageStore';
-import { useServiceStore } from '../../store/serviceStore';
+import { Download, Search, ChevronDown } from '@carbon/icons-react';
+import { useProjectStore } from '../../store/projectStore';
 import { formatDate } from '../../utils/formatters';
 import ServiceUsageDetails from './ServiceUsageDetails';
+import { Database } from '../../types/database.types';
 
-const ServiceUsageList: React.FC = () => {
-  const { usageRecords, loading, fetchUsageRecords } = useServiceUsageStore();
-  const { services } = useServiceStore();
+type Transaction = Database['public']['Tables']['transactions']['Row'] & {
+  subtasks?: Transaction[];
+};
+
+interface ServiceUsageListProps {
+  projectId?: string;
+  serviceId?: string;
+  documentId?: string;
+}
+
+interface ServiceUsageDetailsProps {
+  isOpen: boolean;
+  onClose: () => void;
+  usage: Transaction | null;
+}
+
+const ServiceUsageList: React.FC<ServiceUsageListProps> = ({ projectId, serviceId, documentId }) => {
+  const { fetchServiceTransactions } = useProjectStore();
+  const [transactions, setTransactions] = React.useState<Transaction[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [selectedUsage, setSelectedUsage] = React.useState<Transaction | null>(null);
+  const [expandedItems, setExpandedItems] = React.useState<Set<string>>(new Set());
   
-  // Fetch both services and usage records
+  // Fetch transactions when component mounts or when filters change
   React.useEffect(() => {
-    Promise.all([
-      fetchUsageRecords(),
-      services.length === 0 && useServiceStore.getState().fetchServices(),
-    ]);
-  }, [fetchUsageRecords, services.length]);
-  const [selectedUsage, setSelectedUsage] = React.useState<any>(null);
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        if (projectId && serviceId) {
+          const data = await fetchServiceTransactions(projectId, serviceId);
+          setTransactions(data);
+        }
+      } catch (error) {
+        console.error('Error fetching transactions:', error);
+      }
+      setLoading(false);
+    };
+
+    fetchData();
+  }, [projectId, serviceId, fetchServiceTransactions]);
+  
+  // Filter records by document if documentId is provided
+  const filteredRecords = React.useMemo(() => {
+    if (!documentId) return transactions;
+    return transactions.filter(record => 
+      record.input_document_urls.includes(documentId)
+    );
+  }, [transactions, documentId]);
+
+  const toggleAccordion = (id: string) => {
+    setExpandedItems(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
   
   const headers = [
-    { key: 'service', header: 'Service' },
     { key: 'status', header: 'Status' },
     { key: 'created_at', header: 'Date' },
-    { key: 'document', header: 'Document' },
-    { key: 'custom_input', header: 'Additional Info' },
+    { key: 'description', header: 'Description' },
+    { key: 'documents', header: 'Documents' },
+    { key: 'input', header: 'Input' },
     { key: 'result', header: 'Result' },
   ];
   
-  const rows = usageRecords.map((record) => {
-    const service = services.find(s => s.id === record.service_id);
-    return {
-      id: record.id,
-      service: service?.name || 'Loading...',
-      status: record.status,
-      created_at: formatDate(record.created_at),
-      document: record.document_id ? 'View Document' : 'No Document',
-      custom_input: record.custom_input || '-',
-      result: record.result ? (
-        typeof record.result === 'string' 
-          ? record.result.substring(0, 50) + (record.result.length > 50 ? '...' : '')
-          : 'View Details'
-      ) : '-',
-    };
-  });
-  
+  const rows = filteredRecords.map((record) => ({
+    id: record.id,
+    status: record.status,
+    created_at: formatDate(record.updated_at || record.created_at),
+    description: record.description || '-',
+    documents: record.input_document_urls.length > 0 ? 'View Documents' : 'No Documents',
+    input: record.input_data ? JSON.stringify(record.input_data).substring(0, 50) + '...' : '-',
+    result: record.result_payload ? 'View Details' : '-',
+    subtasks: record.subtasks || []
+  }));
+
   if (loading) {
     return <Loading />;
   }
-  
-  if (usageRecords.length === 0) {
+
+  if (filteredRecords.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center p-8">
         <Tag type="cool-gray">No Transactions</Tag>
-        <p className="mt-4">You haven't used any services yet</p>
+        <p className="mt-4">
+          {documentId 
+            ? "No services have been used with this document" 
+            : "No transactions found for this service"}
+        </p>
       </div>
     );
   }
-  
+
   return (
     <>
       <DataTable rows={rows} headers={headers}>
@@ -77,56 +125,136 @@ const ServiceUsageList: React.FC = () => {
             <TableHead>
               <TableRow>
                 {headers.map((header) => (
-                  <TableHeader key={header.key} {...getHeaderProps({ header })}>
+                  <TableHeader {...getHeaderProps({ header })}>
                     {header.header}
                   </TableHeader>
                 ))}
               </TableRow>
             </TableHead>
             <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.id} {...getRowProps({ row })}>
-                  {row.cells.map((cell) => (
-                    <TableCell key={cell.id}>
-                      {cell.info.header === 'status' ? (
-                        <Tag type={cell.value === 'pending' ? 'blue' : 'green'}>
-                          {cell.value}
-                        </Tag>
-                      ) : cell.info.header === 'service' ? (
-                        <span className="font-medium">{cell.value}</span>
-                      ) : cell.info.header === 'document' && cell.value !== 'No Document' ? (
-                        <div className="flex gap-2">
-                          <Button
-                            kind="ghost"
-                            size="sm"
-                            renderIcon={Download}
-                            iconDescription="Download Document"
-                          >
-                            Download
-                          </Button>
-                        </div>
-                      ) : cell.info.header === 'result' && cell.value !== '-' ? (
-                        <div className="flex gap-2">
-                          <Button
-                            kind="ghost"
-                            size="sm"
-                            renderIcon={Search}
-                            iconDescription="View Details"
-                            onClick={() => {
-                              const usage = usageRecords.find(r => r.id === row.id);
-                              if (usage) setSelectedUsage(usage);
-                            }}
-                          >
-                            Details
-                          </Button>
-                        </div>
-                      ) : (
-                        cell.value
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}
+              {rows.map((row) => {
+                const record = filteredRecords.find(r => r.id === row.id);
+                const hasSubtasks = record?.subtasks && record.subtasks.length > 0;
+                const isExpanded = expandedItems.has(row.id);
+
+                return (
+                  <React.Fragment key={row.id}>
+                    <TableRow {...getRowProps({ row })}>
+                      {row.cells.map((cell) => (
+                        <TableCell>
+                          {cell.info.header === 'status' ? (
+                            <div className="flex items-center gap-2">
+                              {hasSubtasks && (
+                                <Button
+                                  kind="ghost"
+                                  size="sm"
+                                  renderIcon={ChevronDown}
+                                  iconDescription="Toggle subtasks"
+                                  onClick={() => toggleAccordion(row.id)}
+                                  className={`transform transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                />
+                              )}
+                              <Tag type={
+                                cell.value === 'running' ? 'blue' : 
+                                cell.value === 'completed' ? 'green' :
+                                cell.value === 'failed' ? 'red' :
+                                'cool-gray'
+                              }>
+                                {cell.value}
+                              </Tag>
+                            </div>
+                          ) : cell.info.header === 'documents' && cell.value !== 'No Documents' ? (
+                            <div className="flex gap-2">
+                              <Button
+                                kind="ghost"
+                                size="sm"
+                                renderIcon={Download}
+                                iconDescription="Download Documents"
+                              >
+                                Download
+                              </Button>
+                            </div>
+                          ) : cell.info.header === 'result' && cell.value !== '-' ? (
+                            <div className="flex gap-2">
+                              <Button
+                                kind="ghost"
+                                size="sm"
+                                renderIcon={Search}
+                                iconDescription="View Details"
+                                onClick={() => {
+                                  const usage = filteredRecords.find(r => r.id === row.id);
+                                  if (usage) setSelectedUsage(usage);
+                                }}
+                              >
+                                Details
+                              </Button>
+                            </div>
+                          ) : (
+                            cell.value
+                          )}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                    {hasSubtasks && isExpanded && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="p-0">
+                          <Accordion>
+                            {record?.subtasks?.map((subtask) => (
+                              <AccordionItem
+                                key={subtask.id}
+                                title={
+                                  <div className="flex items-center gap-2">
+                                    <Tag type={
+                                      subtask.status === 'running' ? 'blue' : 
+                                      subtask.status === 'completed' ? 'green' :
+                                      subtask.status === 'failed' ? 'red' :
+                                      'cool-gray'
+                                    }>
+                                      {subtask.status}
+                                    </Tag>
+                                    <span className="text-sm">
+                                      {formatDate(subtask.updated_at || subtask.created_at)}
+                                    </span>
+                                  </div>
+                                }
+                              >
+                                <div className="p-4 space-y-4">
+                                  {subtask.description && (
+                                    <div>
+                                      <h4 className="font-semibold mb-2">Description</h4>
+                                      <p className="text-sm text-gray-700">{subtask.description}</p>
+                                    </div>
+                                  )}
+                                  <div>
+                                    <h4 className="font-semibold mb-2">Input</h4>
+                                    <pre className="bg-gray-50 p-2 rounded text-sm overflow-x-auto">
+                                      {JSON.stringify(subtask.input_data, null, 2)}
+                                    </pre>
+                                  </div>
+                                  {subtask.result_payload && (
+                                    <div>
+                                      <h4 className="font-semibold mb-2">Result</h4>
+                                      <pre className="bg-gray-50 p-2 rounded text-sm overflow-x-auto">
+                                        {JSON.stringify(subtask.result_payload, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+                                  {subtask.error_message && (
+                                    <div>
+                                      <h4 className="font-semibold mb-2 text-red-600">Error</h4>
+                                      <p className="text-red-600">{subtask.error_message}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </AccordionItem>
+                            ))}
+                          </Accordion>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </TableBody>
           </Table>
         )}

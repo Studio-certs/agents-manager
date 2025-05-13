@@ -11,11 +11,12 @@ import AdminLayout from './components/layout/AdminLayout';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
-import ProjectDetailPage from './pages/ProjectDetailPage';
+import ProjectDetailPage from './pages/project/ProjectDetailPage';
 import ProfilePage from './pages/ProfilePage';
 import DocumentPage from './pages/DocumentPage';
+// import  PersonalDocumentPage from './pages/personal/PersonalDocumentPage';
 import ServiceTransactionsPage from './pages/ServiceTransactionsPage';
-import MyDocumentsPage from './pages/MyDocumentsPage';
+import PersonalProjectPage from './pages/personal/PersonalProjectPage';
 import ServicesPage from './pages/ServicesPage';
 import ServiceDetailsPage from './pages/ServiceDetailsPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
@@ -27,6 +28,8 @@ import AdminServicesPage from './pages/admin/AdminServicesPage';
 // Import Carbon Design System styles
 import '@carbon/react/index.scss';
 import './index.css';
+import ProjectServiceDetailPage from './pages/project/ProjectServiceDetailPage';
+import ServiceRunPage from './pages/project/ServiceRunPage';
 
 function App() {
   const { initialize, initialized } = useAuthStore();
@@ -38,7 +41,7 @@ function App() {
   }, [initialize, initialized]);
   
   return (
-    <Router>
+    <Router basename="/agents-manager">
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
@@ -46,14 +49,18 @@ function App() {
         <Route path="/" element={<AppLayout />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<DashboardPage />} />
-          <Route path="projects/:id" element={<ProjectDetailPage />} />
-          <Route path="projects/:projectId/documents/:documentId" element={<DocumentPage />} />
-          <Route path="projects" element={<Navigate to="/dashboard" replace />} />
+
+          <Route path="personal" element={<PersonalProjectPage />} />
+          {/* <Route path="personal/:documentId" element={<PersonalProjectPage />} /> */}
+
+          <Route path="projects/:projectId" element={<ProjectDetailPage />} />
+          <Route path="projects/:projectId/services/:serviceId" element={<ProjectServiceDetailPage />} />
+          <Route path="projects/:projectId/services/:serviceId/run" element={<ServiceRunPage />} />
+          {/* <Route path="projects/:projectId/documents/:documentId" element={<DocumentPage />} /> */}
           <Route path="profile" element={<ProfilePage />} />
-          <Route path="my-documents" element={<MyDocumentsPage />} />
           <Route path="services" element={<ServicesPage />} />
-          <Route path="services/transactions" element={<ServiceTransactionsPage />} />
           <Route path="services/:id" element={<ServiceDetailsPage />} />
+          {/* <Route path="services/transactions" element={<ServiceTransactionsPage />} /> */}
         </Route>
         
         <Route path="/admin" element={<AdminLayout />}>
