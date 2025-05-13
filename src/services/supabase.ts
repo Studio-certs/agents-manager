@@ -46,13 +46,19 @@ async function retryWithBackoff<T>(
       
       // Wait before retrying
       await new Promise(resolve => setTimeout(resolve, delay));
+      
+      // If this was the last attempt and failed, try to reconnect
+      if (attempt === maxRetries - 1) {
+        reconnectSupabase();
+      }
     }
   }
   
   throw lastError || new Error('Operation failed after maximum retries');
 }
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+// Create Supabase client instance
+export let supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
@@ -60,7 +66,17 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   }
 });
 
-// Wrap auth operations with retry mechanism
+// Function to reconnect Supabase
+export function reconnectSupabase() {
+  supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  });
+}
+
 export async function getCurrentUser() {
   try {
     const { data: { session }, error } = await retryWithBackoff(() => 
