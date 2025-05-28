@@ -1,99 +1,27 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
-  DataTable,
-  Table,
-  TableHead,
-  TableRow,
-  TableHeader,
-  TableBody,
-  TableCell,
+  Accordion,
+  AccordionItem,
   Loading,
   Tag,
   Button,
-  Accordion,
-  AccordionItem,
 } from '@carbon/react';
 import { Edit, TrashCan } from '@carbon/icons-react';
 import { useServiceStore } from '../../store/serviceStore';
 import { formatDate } from '../../utils/formatters';
-import { supabase } from '../../services/supabase';
 import ServiceMetrics from './ServiceMetrics';
 
 interface ServiceListProps {
   onEdit: (service: any) => void;
 }
 
-interface ServiceMetrics {
-  total_transactions: number;
-  total_tokens: number;
-  total_cost: number;
-  total_runtime: number;
-  status_counts: {
-    completed: number;
-    failed: number;
-    running: number;
-    pending: number;
-  };
-  resource_type_counts: {
-    llm: number;
-    embedding: number;
-    storage: number;
-    processing: number;
-  };
-  last_used: string | null;
-}
-
 const ServiceList: React.FC<ServiceListProps> = ({ onEdit }) => {
   const { services, loading, fetchServices, deleteService } = useServiceStore();
-  const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set());
-  const [metricsLoading, setMetricsLoading] = useState<Record<string, boolean>>({});
-  const [serviceMetrics, setServiceMetrics] = useState<Record<string, ServiceMetrics>>({});
+  const [expandedServices, setExpandedServices] = React.useState<Set<string>>(new Set());
   
-  useEffect(() => {
+  React.useEffect(() => {
     fetchServices();
   }, [fetchServices]);
-
-  const fetchServiceMetrics = async (serviceId: string) => {
-    setMetricsLoading(prev => ({ ...prev, [serviceId]: true }));
-    try {
-      // Fetch all transactions for this service
-      const { data: transactions, error } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('service_id', serviceId);
-
-      if (error) throw error;
-
-      // Calculate metrics
-      const metrics: ServiceMetrics = {
-        total_transactions: transactions.length,
-        total_tokens: transactions.reduce((sum, t) => sum + (t.tokens_total || 0), 0),
-        total_cost: transactions.reduce((sum, t) => sum + (t.resources_used_cost || 0), 0),
-        total_runtime: transactions.reduce((sum, t) => sum + (t.runtime_ms || 0), 0),
-        status_counts: {
-          completed: transactions.filter(t => t.status === 'completed').length,
-          failed: transactions.filter(t => t.status === 'failed').length,
-          running: transactions.filter(t => t.status === 'running').length,
-          pending: transactions.filter(t => t.status === 'pending').length,
-        },
-        resource_type_counts: {
-          llm: transactions.filter(t => t.resource_type === 'llm').length,
-          embedding: transactions.filter(t => t.resource_type === 'embedding').length,
-          storage: transactions.filter(t => t.resource_type === 'storage').length,
-          processing: transactions.filter(t => t.resource_type === 'processing').length,
-        },
-        last_used: transactions.length > 0 
-          ? transactions.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0].created_at
-          : null,
-      };
-
-      setServiceMetrics(prev => ({ ...prev, [serviceId]: metrics }));
-    } catch (error) {
-      console.error('Error fetching service metrics:', error);
-    } finally {
-      setMetricsLoading(prev => ({ ...prev, [serviceId]: false }));
-    }
-  };
 
   const toggleServiceExpansion = (serviceId: string) => {
     const newExpanded = new Set(expandedServices);
@@ -101,9 +29,6 @@ const ServiceList: React.FC<ServiceListProps> = ({ onEdit }) => {
       newExpanded.delete(serviceId);
     } else {
       newExpanded.add(serviceId);
-      if (!serviceMetrics[serviceId]) {
-        fetchServiceMetrics(serviceId);
-      }
     }
     setExpandedServices(newExpanded);
   };
@@ -181,11 +106,7 @@ const ServiceList: React.FC<ServiceListProps> = ({ onEdit }) => {
 
             <div className="mt-6">
               <h3 className="text-lg font-semibold mb-4">Usage Metrics</h3>
-              <ServiceMetrics
-                serviceId={service.id}
-                metrics={serviceMetrics[service.id]}
-                loading={metricsLoading[service.id]}
-              />
+              <ServiceMetrics service={service} />
             </div>
           </div>
         </AccordionItem>
